@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema Integrado - Gage R&R</title>
+    <!-- Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js para os gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Plugin ChartDataLabels para mostrar valores no Histograma -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <!-- sql.js para ler o ficheiro SQLite (.db) diretamente no browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; }
+        .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; font-weight: 600; }
+        .tab-inactive { color: #6b7280; }
+        .tab-inactive:hover { color: #374151; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: left; }
+        th { background-color: #f9fafb; font-weight: 600; }
+        .card { background: white; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+        .btn { transition: all 0.2s; }
+        .btn:active { transform: scale(0.98); }
+        .checkbox-label { display: flex; align-items: center; cursor: pointer; }
+    </style>
+</head>
+<body onload="inicializarApp()">
+
+<!-- SISTEMA DE MODAL PERSONALIZADO (Substitui os alerts e confirms bloqueados) -->
+<div id="custom-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[100] flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all">
+        <h2 id="modal-title" class="text-xl font-bold mb-4 text-gray-800">Mensagem</h2>
+        <p id="modal-message" class="text-gray-600 mb-6 whitespace-pre-line"></p>
+        <div class="flex justify-end gap-3" id="modal-buttons">
+            <!-- Botões gerados via JS -->
+        </div>
+    </div>
+</div>
+
+<div id="app" class="max-w-7xl mx-auto p-4">
+    
+    <!-- Cabeçalho -->
+    <header class="mb-6 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800">SISTEMA R&R</h1>
+            <p class="text-gray-500">Módulo Integrado: Base de Dados SQLite e Análise Estatística</p>
+        </div>
+    </header>
+
+    <!-- Separadores de Navegação -->
+    <nav class="flex space-x-8 border-b border-gray-200 mb-6 overflow-x-auto">
+        <button onclick="switchTab('config')" id="tab-config" class="tab-active pb-2 px-1 focus:outline-none whitespace-nowrap">1. Gestão de Dados</button>
+        <button onclick="switchTab('data')" id="tab-data" class="tab-inactive pb-2 px-1 focus:outline-none whitespace-nowrap">2. Coleta / Edição de Medições</button>
+        <button onclick="switchTab('analysis')" id="tab-analysis" class="tab-inactive pb-2 px-1 focus:outline-none whitespace-nowrap">3. Executar Análise</button>
+        <button onclick="switchTab('results')" id="tab-results" class="tab-inactive pb-2 px-1 focus:outline-none hidden whitespace-nowrap">4. Resultados Numéricos</button>
+        <button onclick="switchTab('charts')" id="tab-charts" class="tab-inactive pb-2 px-1 focus:outline-none hidden whitespace-nowrap">5. Gráficos</button>
+    </nav>
+
+    <!-- SEPARADOR 1: CONFIGURAÇÃO (MENUS DE ESCOLHA VS NOVOS DADOS) -->
+    <div id="view-config" class="block">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            <!-- MENU A: DADOS EXISTENTES (Base de Dados) -->
+            <div class="card border-t-4 border-blue-500 bg-white">
+                <h2 class="text-xl font-bold text-gray-800 mb-2">Menu A: Utilizar Dados Existentes</h2>
+                <p class="text-sm text-gray-600 mb-6">Importe o ficheiro e selecione os operadores cujos dados já se encontram carregados no sistema.</p>
+                
+                <div class="mb-6 bg-blue-50 p-4 rounded border border-blue-100">
+                    <label class="block text-sm font-bold text-blue-800 mb-2">1. Importar Ficheiro (.db)</label>
+                    <input type="file" id="db-file-input" accept=".db,.sqlite" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold
+                        file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer" onchange="importarSQLite(event)"/>
+                    <p class="text-xs text-gray-500 mt-2 italic" id="import-status">Aguardando importação do ficheiro...</p>
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <label class="block text-sm font-bold text-gray-700">2. Escolher Operadores Carregados</label>
+                        <span id="db-status-badge" class="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs font-bold">Vazio</span>
+                    </div>
+                    
+                    <div id="db-operadores-list" class="grid grid-cols-2 gap-3 mb-4 max-h-48 overflow-y-auto p-2 border border-gray-200 rounded bg-gray-50">
+                        <!-- Checkboxes geradas via JS -->
+                    </div>
+
+                    <button onclick="iniciarComDadosExistentes()" class="btn w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow">
+                        Avançar com a Seleção
+                    </button>
+                </div>
+
+                <!-- NOVO ITEM 3: APAGAR DADOS -->
+                <div class="mt-6 bg-red-50 p-4 rounded border border-red-100">
+                    <label class="block text-sm font-bold text-red-800 mb-2">3. Apagar Operadores Carregados</label>
+                    <p class="text-xs text-red-600 mb-3">Remova operadores incorretos ou limpe a base de dados.</p>
+                    <div class="flex gap-2">
+                        <select id="select-apagar-operador" class="flex-1 border border-gray-300 rounded p-2 text-sm focus:ring-red-500 focus:border-red-500">
+                            <option value="">Selecione um operador...</option>
+                        </select>
+                        <button onclick="apagarOperadorSelecionado()" class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow">
+                            Apagar
+                        </button>
+                    </div>
+                    <div class="mt-3 text-right">
+                        <button onclick="apagarTodosOperadores()" class="text-xs text-red-600 hover:text-red-800 underline font-semibold focus:outline-none">
+                            Apagar todos os dados do sistema
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <button onclick="exportarSQLite()" class="btn w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded shadow" title="Descarregar a Base de Dados atualizada (com novas edições/inserções) para o seu computador.">
+                        📥 Exportar Ficheiro (.db)
+                    </button>
+                </div>
+            </div>
+
+            <!-- MENU B: INSERIR NOVOS DADOS -->
+            <div class="card border-t-4 border-purple-500 bg-white h-fit">
+                <h2 class="text-xl font-bold text-gray-800 mb-2">Menu B: Inserir Novos Dados Manualmente</h2>
+                <p class="text-sm text-gray-600 mb-6">Ignore a base de dados. Configure os parâmetros abaixo para gerar uma grelha limpa e introduzir dados do zero.</p>
+                
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Operadores (separados por vírgula)</label>
+                        <input type="text" id="cfg-operadores-novos" placeholder="Ex: João, Maria, Carlos" class="w-full border border-gray-300 rounded p-2 focus:ring-purple-500 focus:border-purple-500">
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Quantidade de Peças</label>
+                            <input type="number" id="cfg-pecas-novas" min="1" class="w-full border border-gray-300 rounded p-2 focus:ring-purple-500 focus:border-purple-500" value="10">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Repetições</label>
+                            <input type="number" id="cfg-reps-novas" min="2" class="w-full border border-gray-300 rounded p-2 focus:ring-purple-500 focus:border-purple-500" value="3">
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <button onclick="iniciarNovosDadosManuais()" class="btn w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded shadow">
+                            Criar Grelha Vazia
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- SEPARADOR 2: Coleta de Dados -->
+    <div id="view-data" class="hidden">
+        <div class="card">
+            <h2 class="text-xl font-bold border-b pb-2 mb-4">Grelha de Medições</h2>
+            <p class="mb-4 text-sm text-gray-600">Confirme ou introduza os valores separados por vírgula (Ex: <code class="bg-gray-100 px-1">20.011, 20.013, 20.012</code>).</p>
+            
+            <div id="data-entry-container" class="space-y-6">
+                <!-- Gerado via JS -->
+            </div>
+
+            <div class="mt-6 flex justify-end items-center">
+                <button onclick="salvarEAvancarAnalise()" class="btn bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-8 rounded shadow text-lg">Confirmar Medições e Ir para Análise</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEPARADOR 3: Análise -->
+    <div id="view-analysis" class="hidden card">
+        <h2 class="text-xl font-bold border-b pb-2 mb-4">Configuração da Análise Estatística</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Método de Análise</label>
+                <select id="calc-metodo" class="w-full border border-gray-300 rounded p-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="amplitudes">Método das Amplitudes</option>
+                    <option value="anova" selected>Método ANOVA (Recomendado)</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Tolerância Total da Característica</label>
+                <input type="number" id="calc-tolerancia" step="0.001" class="w-full border border-gray-300 rounded p-2 focus:ring-blue-500 focus:border-blue-500" value="0.5">
+            </div>
+        </div>
+
+        <button onclick="executarAnaliseEstatistica()" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded text-lg w-full md:w-auto shadow-md">Executar Estudo R&R</button>
+    </div>
+
+    <!-- SEPARADOR 4: Resultados -->
+    <div id="view-results" class="hidden space-y-6">
+        <!-- Preenchido via JS -->
+    </div>
+
+    <!-- SEPARADOR 5: Gráficos -->
+    <div id="view-charts" class="hidden space-y-8">
+        <div class="card">
+            <h3 class="text-lg font-bold mb-4 text-center">Interação Peça x Operador</h3>
+            <canvas id="chart-interaction" height="100"></canvas>
+        </div>
+        <div id="charts-operadores-container" class="space-y-8">
+            <!-- Histogramas e Medias/Amplitudes por operador -->
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // ==========================================================
+    // SISTEMA DE MODAL PERSONALIZADO (Evita bloqueios no iframe)
+    // ==========================================================
+    function showModal(title, message, type, onConfirm = null) {
+        const modal = document.getElementById('custom-modal');
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-message').innerText = message;
+        const btnContainer = document.getElementById('modal-buttons');
+        btnContainer.innerHTML = '';
+
+        if (type === 'alert') {
+            const btnOk = document.createElement('button');
+            btnOk.className = 'bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow';
+            btnOk.innerText = 'OK';
+            btnOk.onclick = () => { modal.classList.add('hidden'); if(onConfirm) onConfirm(); };
+            btnContainer.appendChild(btnOk);
+        } else if (type === 'confirm') {
+            const btnCancel = document.createElement('button');
+            btnCancel.className = 'bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded';
+            btnCancel.innerText = 'Cancelar';
+            btnCancel.onclick = () => { modal.classList.add('hidden'); };
+            
+            const btnConfirm = document.createElement('button');
+            btnConfirm.className = 'bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow';
+            btnConfirm.innerText = 'Confirmar';
+            btnConfirm.onclick = () => { modal.classList.add('hidden'); if(onConfirm) onConfirm(); };
+            
+            btnContainer.appendChild(btnCancel);
+            btnContainer.appendChild(btnConfirm);
+        }
+        modal.classList.remove('hidden');
+    }
+
+    function customAlert(msg) {
+        showModal('Aviso do Sistema', msg, 'alert');
+    }
+
+    // ==========================================================
+    // ESTADO E CONSTANTES DA APLICAÇÃO
+    // ==========================================================
+    const FATOR_COBERTURA_99 = 5.152; 
+    const D2_TABELA = {
+        2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534, 7: 2.704,
+        8: 2.847, 9: 2.970, 10: 3.078, 11: 3.173, 12: 3.258, 13: 3.336,
+        14: 3.407, 15: 3.472, 16: 3.532, 17: 3.588, 18: 3.640, 19: 3.689,
+        20: 3.735, 21: 3.778, 22: 3.819, 23: 3.858, 24: 3.895, 25: 3.931
+    };
+
+    let appState = {
+        dbCompleto: [],
+        operadoresDisponiveis: [],
+        operadores: [],
+        qtdPecas: 0,
+        qtdRepeticoes: 0,
+        dbMedicoes: [],          
+        resultado: null
+    };
+
+    let chartInstances = [];
+
+    const escapeHTML = (str) => {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+
+    // ==========================================================
+    // INICIALIZAÇÃO E INTEGRAÇÃO DO SQLITE
+    // ==========================================================
+    let SQL = null;
+    let dbInstance = null; 
+
+    async function inicializarApp() {
+        try {
+            if (typeof initSqlJs !== 'function') {
+                throw new Error("A biblioteca sql.js não foi carregada. Verifique a internet.");
+            }
+            SQL = await initSqlJs({
+                locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${filename}`
+            });
+            criarBancoVazio();
+            sincronizarDbCompleto(); 
+        } catch (error) {
+            console.error("Erro ao inicializar SQL.js:", error);
+            customAlert("Erro ao inicializar a base de dados. " + error.message);
+        }
+    }
+
+    function criarBancoVazio() {
+        if(dbInstance) dbInstance.close();
+        dbInstance = new SQL.Database();
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS medicoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operador TEXT NOT NULL,
+                peca INTEGER NOT NULL,
+                repeticao INTEGER NOT NULL,
+                valor REAL NOT NULL,
+                UNIQUE (operador, peca, repeticao)
+            );
+        `);
+    }
+
+    function sincronizarDbCompleto() {
+        if (!dbInstance) return;
+        const res = dbInstance.exec("SELECT id, operador, peca, repeticao, valor FROM medicoes ORDER BY operador, peca, repeticao");
+        
+        appState.dbCompleto = [];
+        if (res.length > 0) {
+            const columns = res[0].columns;
+            appState.dbCompleto = res[0].values.map(row => {
+                let obj = {};
+                columns.forEach((col, idx) => obj[col] = row[idx]);
+                return obj;
+            });
+        }
+        atualizarListaMenuExistentes();
+    }
+
+    // ==========================================================
+    // UTILITÁRIOS
+    // ==========================================================
+    function obter_d2(subgrupo) { return D2_TABELA[subgrupo] || null; }
+
+    function classificar(percentual) {
+        if (percentual < 10) return "<span class='text-green-600 font-bold'>Medição aceitável</span>";
+        if (percentual <= 30) return "<span class='text-yellow-600 font-bold'>Pode ser aceitável</span>";
+        return "<span class='text-red-600 font-bold'>Não é aceitável</span>";
+    }
+
+    // NOVA FUNÇÃO: Cálculo do NDC
+    function calcular_ndc(desvio_padrao_peca_a_peca, desvio_padrao_rr) {
+        if (desvio_padrao_rr <= 0) return 0;
+        const razao_variacao = desvio_padrao_peca_a_peca / desvio_padrao_rr;
+        const ndc_calculado = 1.41 * razao_variacao;
+        return Math.floor(ndc_calculado); // Arredonda sempre para baixo
+    }
+
+    // NOVA FUNÇÃO: Interpretação do NDC
+    function interpretar_ndc(ndc) {
+        if (ndc < 2) return "Sistema praticamente incapaz de distinguir categorias de peças.";
+        if (ndc < 5) return "Sistema com baixa capacidade de discriminação.";
+        if (ndc < 10) return "Sistema aceitável para distinguir categorias de peças.";
+        return "Sistema com boa capacidade de discriminação.";
+    }
+
+    const math = {
+        sum: arr => arr.reduce((a, b) => a + b, 0),
+        mean: arr => arr.length === 0 ? 0 : math.sum(arr) / arr.length,
+        max: arr => Math.max(...arr),
+        min: arr => Math.min(...arr),
+        range: arr => math.max(arr) - math.min(arr)
+    };
+
+    function normalizar_operador(nome) { return nome.trim().toUpperCase(); }
+
+    function switchTab(tabId) {
+        const tabs = ['config', 'data', 'analysis', 'results', 'charts'];
+        tabs.forEach(t => {
+            document.getElementById('view-' + t).classList.add('hidden');
+            document.getElementById('tab-' + t).classList.remove('tab-active');
+            document.getElementById('tab-' + t).classList.add('tab-inactive');
+        });
+        document.getElementById('view-' + tabId).classList.remove('hidden');
+        document.getElementById('tab-' + tabId).classList.remove('tab-inactive');
+        document.getElementById('tab-' + tabId).classList.add('tab-active');
+    }
+
+    // ==========================================================
+    // IMPORTAÇÃO E EXPORTAÇÃO DE SQLITE (MENU A)
+    // ==========================================================
+    async function importarSQLite(event) {
+        if (!SQL) {
+            customAlert("A biblioteca do banco de dados ainda não foi carregada. Aguarde uns segundos.");
+            return;
+        }
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function() {
+            try {
+                const uInt8Array = new Uint8Array(reader.result);
+                if (dbInstance) dbInstance.close();
+                dbInstance = new SQL.Database(uInt8Array);
+                
+                const checkRes = dbInstance.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='medicoes'");
+                if (checkRes.length === 0) {
+                    dbInstance.exec(`CREATE TABLE medicoes (id INTEGER PRIMARY KEY AUTOINCREMENT, operador TEXT NOT NULL, peca INTEGER NOT NULL, repeticao INTEGER NOT NULL, valor REAL NOT NULL, UNIQUE (operador, peca, repeticao));`);
+                }
+
+                document.getElementById('import-status').innerText = "✓ Ficheiro lido com sucesso! A base de dados foi atualizada.";
+                document.getElementById('import-status').classList.replace('text-blue-600', 'text-green-600');
+                
+                sincronizarDbCompleto();
+            } catch (error) {
+                console.error(error);
+                customAlert("Erro ao ler o ficheiro SQLite.\nDetalhe: " + error.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function exportarSQLite() {
+        if (!dbInstance) {
+            customAlert("Não há dados no banco para exportar.");
+            return;
+        }
+        try {
+            const data = dbInstance.export();
+            const blob = new Blob([data], {type: "application/octet-stream"});
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "rr_estudo_atualizado.db";
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error("Erro ao exportar:", e);
+            customAlert("Falha ao exportar a base de dados.");
+        }
+    }
+
+    function atualizarListaMenuExistentes() {
+        const checkboxesAtuais = document.querySelectorAll('#db-operadores-list input[type="checkbox"]:checked');
+        const selecionadosAnteriormente = new Set(Array.from(checkboxesAtuais).map(cb => cb.value));
+
+        appState.operadoresDisponiveis = [...new Set(appState.dbCompleto.map(d => d.operador))].sort();
+
+        const badge = document.getElementById('db-status-badge');
+        badge.innerText = `${appState.dbCompleto.length} registos em Memória`;
+        badge.className = "bg-blue-600 text-white px-3 py-1 rounded text-xs font-bold";
+
+        const listDiv = document.getElementById('db-operadores-list');
+        listDiv.innerHTML = '';
+        
+        const selectApagar = document.getElementById('select-apagar-operador');
+        selectApagar.innerHTML = '<option value="">Selecione um operador...</option>';
+
+        if (appState.operadoresDisponiveis.length === 0) {
+            listDiv.innerHTML = '<p class="text-sm text-gray-500 p-2">Nenhum dado encontrado. Importe um ficheiro.</p>';
+            badge.className = "bg-gray-200 text-gray-600 px-3 py-1 rounded text-xs font-bold";
+            return;
+        }
+
+        appState.operadoresDisponiveis.forEach(op => {
+            const safeHtmlOp = escapeHTML(op);
+            const isChecked = selecionadosAnteriormente.has(safeHtmlOp) ? 'checked' : '';
+            
+            const container = document.createElement('div');
+            container.className = "flex items-center justify-between bg-white border border-gray-300 p-2 rounded hover:bg-blue-50 shadow-sm transition-colors";
+            
+            container.innerHTML = `
+                <label class="checkbox-label flex-1 flex items-center cursor-pointer m-0">
+                    <input type="checkbox" value="${safeHtmlOp}" ${isChecked} class="mr-2 h-4 w-4 text-blue-600">
+                    <span class="text-sm font-medium text-gray-700 truncate" title="${safeHtmlOp}">${safeHtmlOp}</span>
+                </label>
+            `;
+            listDiv.appendChild(container);
+            
+            const option = document.createElement('option');
+            option.value = op;
+            option.textContent = op;
+            selectApagar.appendChild(option);
+        });
+    }
+
+    function apagarOperadorSelecionado() {
+        const select = document.getElementById('select-apagar-operador');
+        const op = select.value;
+        
+        if (!op) {
+            customAlert("Selecione um operador na lista pendente para apagar.");
+            return;
+        }
+        
+        showModal('Atenção', `Tem a certeza que pretende apagar TODOS os dados do operador "${op}" da base de dados?`, 'confirm', () => {
+            if (dbInstance) {
+                try {
+                    dbInstance.run("DELETE FROM medicoes WHERE UPPER(TRIM(operador)) = UPPER(TRIM(?))", [op]);
+                    
+                    appState.operadores = appState.operadores.filter(o => o !== op);
+                    appState.dbMedicoes = appState.dbMedicoes.filter(d => d.operador !== op);
+                    document.getElementById('data-entry-container').innerHTML = ''; 
+                    
+                    sincronizarDbCompleto(); 
+                    customAlert(`Dados do operador "${op}" apagados com sucesso!`);
+                } catch (e) {
+                    console.error("Erro ao apagar operador:", e);
+                    customAlert("Erro ao apagar os dados do operador na base de dados.");
+                }
+            }
+        });
+    }
+
+    function apagarTodosOperadores() {
+        showModal('Alerta Crítico', "ATENÇÃO: Vai apagar COMPLETAMENTE todos os dados carregados no sistema. Deseja continuar?", 'confirm', () => {
+            if (dbInstance) {
+                try {
+                    dbInstance.run("DELETE FROM medicoes");
+                    
+                    appState.operadores = [];
+                    appState.dbMedicoes = [];
+                    document.getElementById('data-entry-container').innerHTML = '';
+                    
+                    sincronizarDbCompleto(); 
+                    customAlert(`Todos os dados do sistema foram apagados com sucesso!`);
+                } catch (e) {
+                    console.error("Erro ao apagar todos os dados:", e);
+                    customAlert("Erro ao limpar a base de dados.");
+                }
+            }
+        });
+    }
+
+    // ==========================================================
+    // TRANSIÇÃO PARA A GRELHA (MENU A E MENU B)
+    // ==========================================================
+    function iniciarComDadosExistentes() {
+        const checkboxes = document.querySelectorAll('#db-operadores-list input[type="checkbox"]:checked');
+        const selecionados = Array.from(checkboxes).map(cb => cb.value);
+        
+        if (selecionados.length < 2) {
+            customAlert("Selecione pelo menos 2 operadores na lista para realizar o estudo R&R.");
+            return;
+        }
+
+        appState.operadores = selecionados;
+        
+        const dadosOps = appState.dbCompleto.filter(d => selecionados.includes(d.operador));
+        const maxPecas = Math.max(...dadosOps.map(d => parseInt(d.peca)));
+        const maxReps = Math.max(...dadosOps.map(d => parseInt(d.repeticao)));
+
+        if (!maxPecas || !maxReps || maxPecas < 1 || maxReps < 2) {
+            customAlert("Aviso: Dados não encontrados ou incompletos na base de dados.");
+            return;
+        }
+
+        appState.qtdPecas = maxPecas;
+        appState.qtdRepeticoes = maxReps;
+
+        gerarGrelhaUI(true); 
+        switchTab('data');
+    }
+
+    function iniciarNovosDadosManuais() {
+        const opStr = document.getElementById('cfg-operadores-novos').value;
+        const pecas = parseInt(document.getElementById('cfg-pecas-novas').value);
+        const reps = parseInt(document.getElementById('cfg-reps-novas').value);
+
+        if(!opStr || isNaN(pecas) || isNaN(reps) || pecas < 1 || reps < 2) {
+            customAlert("Preencha corretamente os parâmetros: nomes dos operadores, no mínimo 2 repetições e 1 peça.");
+            return;
+        }
+
+        let ops = opStr.split(',').map(normalizar_operador).filter(op => op !== "");
+        let vistos = new Set();
+        for(let op of ops) {
+            if(vistos.has(op)) { customAlert(`Operador repetido na digitação: ${op}`); return; }
+            vistos.add(op);
+        }
+        
+        if (ops.length < 2) {
+            customAlert("Introduza pelo menos 2 operadores separados por vírgula para o estudo R&R.");
+            return;
+        }
+
+        appState.operadores = ops;
+        appState.qtdPecas = pecas;
+        appState.qtdRepeticoes = reps;
+
+        gerarGrelhaUI(false); 
+        switchTab('data');
+    }
+
+    function gerarGrelhaUI(usarDbCompleto) {
+        const container = document.getElementById('data-entry-container');
+        container.innerHTML = '';
+
+        appState.operadores.forEach((op, opIndex) => {
+            let opDiv = document.createElement('div');
+            opDiv.className = 'border border-gray-200 rounded p-4 bg-gray-50';
+            opDiv.innerHTML = `<h3 class="font-bold text-lg mb-3 text-gray-800 border-b pb-1">OPERADOR: <span class="text-blue-700">${escapeHTML(op)}</span></h3>`;
+            
+            let gridDiv = document.createElement('div');
+            gridDiv.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4';
+
+            for(let p = 1; p <= appState.qtdPecas; p++) {
+                let valoresParaInput = "";
+                
+                if(usarDbCompleto && appState.dbCompleto.length > 0) {
+                    const mediçoesBase = appState.dbCompleto
+                        .filter(d => d.operador === op && parseInt(d.peca) === p)
+                        .sort((a,b) => a.repeticao - b.repeticao)
+                        .map(d => d.valor);
+                    
+                    if(mediçoesBase.length > 0) {
+                        valoresParaInput = mediçoesBase.slice(0, appState.qtdRepeticoes).join(' ');
+                    }
+                }
+
+                gridDiv.innerHTML += `
+                    <div class="bg-white p-3 rounded border shadow-sm hover:shadow-md transition-shadow">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Peça ${p} <span class="text-xs text-gray-500 font-normal">(${appState.qtdRepeticoes} valores)</span></label>
+                        <input type="text" id="val_op${opIndex}_p${p}" class="w-full border border-gray-300 rounded p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500 font-mono transition-colors" placeholder="Ex: 20,1  20,2  20,3" value="${valoresParaInput}">
+                    </div>
+                `;
+            }
+            opDiv.appendChild(gridDiv);
+            container.appendChild(opDiv);
+        });
+    }
+
+    function salvarEAvancarAnalise() {
+        try {
+            appState.dbMedicoes = [];
+            let idCounter = 1;
+            let registrosParaBanco = [];
+
+            for(let opIndex = 0; opIndex < appState.operadores.length; opIndex++) {
+                const op = appState.operadores[opIndex];
+
+                for(let p = 1; p <= appState.qtdPecas; p++) {
+                    const idCampo = `val_op${opIndex}_p${p}`;
+                    const el = document.getElementById(idCampo);
+                    
+                    if(!el) return customAlert(`Erro Crítico: Campo não encontrado no ecrã.`);
+
+                    const inputVal = el.value.trim();
+                    if(!inputVal) {
+                        el.focus();
+                        el.style.borderColor = "red";
+                        return customAlert(`Falta preencher as medições no Operador ${op}, Peça ${p}.`);
+                    }
+
+                    const rawParts = inputVal.split(/[,\s;\|]+/).filter(v => v.trim() !== "");
+                    const vals = rawParts.map(v => parseFloat(v.replace(',', '.')));
+                    
+                    if(vals.length !== appState.qtdRepeticoes || vals.some(isNaN)) {
+                        el.focus();
+                        el.style.borderColor = "red";
+                        return customAlert(`Erro na digitação do Operador ${op}, Peça ${p}.\nEsperados: ${appState.qtdRepeticoes} valores.\nEncontrados: ${vals.length} valor(es).`);
+                    }
+
+                    el.style.borderColor = "";
+
+                    vals.forEach((valor, rIdx) => {
+                        const repeticao = rIdx + 1;
+                        appState.dbMedicoes.push({ id: idCounter++, operador: op, peca: p, repeticao: repeticao, valor: valor });
+                        registrosParaBanco.push({ op, p, repeticao, valor });
+                    });
+                }
+            }
+
+            if (dbInstance && registrosParaBanco.length > 0) {
+                try {
+                    dbInstance.exec("BEGIN TRANSACTION;");
+                    registrosParaBanco.forEach(row => {
+                        dbInstance.run(
+                            "INSERT OR REPLACE INTO medicoes (operador, peca, repeticao, valor) VALUES (?, ?, ?, ?)",
+                            [row.op, row.p, row.repeticao, row.valor]
+                        );
+                    });
+                    dbInstance.exec("COMMIT;");
+                    sincronizarDbCompleto(); 
+                } catch (e) {
+                    console.error("Erro ao gravar na base de dados SQLite:", e);
+                    dbInstance.exec("ROLLBACK;"); 
+                }
+            }
+
+            switchTab('analysis');
+
+        } catch (err) {
+            customAlert("Ocorreu um erro no sistema: " + err.message);
+            console.error(err);
+        }
+    }
+
+    // ==========================================================
+    // CÁLCULOS ESTATÍSTICOS (AMPLITUDES E ANOVA)
+    // ==========================================================
+    function calcularEstatisticasPorOperador(dadosFiltrados) {
+        let estatisticas = {};
+        for(let op in dadosFiltrados) {
+            let medias_peca = {};
+            let amplitudes_peca = {};
+            for(let peca in dadosFiltrados[op]) {
+                const vals = dadosFiltrados[op][peca];
+                medias_peca[peca] = math.mean(vals);
+                amplitudes_peca[peca] = math.range(vals);
+            }
+            estatisticas[op] = {
+                media_por_peca: medias_peca,
+                amplitude_por_peca: amplitudes_peca,
+                media_global_operador: math.mean(Object.values(medias_peca)),
+                amplitude_media_operador: math.mean(Object.values(amplitudes_peca))
+            };
+        }
+        return estatisticas;
+    }
+
+    function transformarParaDicionario() {
+        let dicionario = {};
+        appState.dbMedicoes.forEach(row => {
+            if(!dicionario[row.operador]) dicionario[row.operador] = {};
+            if(!dicionario[row.operador][row.peca]) dicionario[row.operador][row.peca] = [];
+            dicionario[row.operador][row.peca].push(row.valor);
+        });
+        return dicionario;
+    }
+
+    function calcular_amplitudes(dados_operadores, tolerancia) {
+        const numPecas = appState.qtdPecas, numReps = appState.qtdRepeticoes, numOps = appState.operadores.length;
+        const d2_reps = obter_d2(numReps), d2_ops = obter_d2(numOps), d2_pecas = obter_d2(numPecas);
+
+        if(!d2_reps || !d2_ops || !d2_pecas) throw new Error("Tamanho de amostra fora da tabela d2 suportada (max 25).");
+
+        const estatisticas = calcularEstatisticasPorOperador(dados_operadores);
+        const amplitudes_medias = Object.values(estatisticas).map(e => e.amplitude_media_operador);
+        const amplitude_media_global = math.mean(amplitudes_medias);
+        const medias_globais = Object.values(estatisticas).map(e => e.media_global_operador);
+
+        const desvio_re = amplitude_media_global / d2_reps;
+        const amplitude_ops = math.range(medias_globais);
+        const desvio_op_bruto = amplitude_ops / d2_ops;
+        
+        let variancia_op_corr = Math.max(0, Math.pow(desvio_op_bruto, 2) - (Math.pow(desvio_re, 2) / (numPecas * numReps)));
+        const desvio_op_corr = Math.sqrt(variancia_op_corr);
+
+        let medias_por_peca_todas = [];
+        for(let p=1; p<=numPecas; p++) {
+            let m_peca_ops = [];
+            for(let op of appState.operadores) m_peca_ops.push(estatisticas[op].media_por_peca[p]);
+            medias_por_peca_todas.push(math.mean(m_peca_ops));
+        }
+
+        const amplitude_pecas = math.range(medias_por_peca_todas);
+        const desvio_peca = amplitude_pecas / d2_pecas;
+        const desvio_rr = Math.sqrt(Math.pow(desvio_re, 2) + Math.pow(desvio_op_corr, 2));
+        const desvio_total = Math.sqrt(Math.pow(desvio_rr, 2) + Math.pow(desvio_peca, 2));
+
+        // Integração do cálculo do NDC
+        const ndc = calcular_ndc(desvio_peca, desvio_rr);
+        const ndc_interpretacao = interpretar_ndc(ndc);
+
+        return {
+            metodo: 'Amplitudes', tolerancia_total: tolerancia, estatisticas_operadores: estatisticas,
+            desvio_padrao_repetitividade: desvio_re, repetitividade_99: FATOR_COBERTURA_99 * desvio_re,
+            desvio_padrao_operadores_corrigido: desvio_op_corr, reprodutibilidade_99: FATOR_COBERTURA_99 * desvio_op_corr,
+            desvio_padrao_peca_a_peca: desvio_peca, variacao_peca_a_peca_99: FATOR_COBERTURA_99 * desvio_peca,
+            desvio_padrao_rr: desvio_rr, rr_total: FATOR_COBERTURA_99 * desvio_rr,
+            desvio_padrao_total: desvio_total, variacao_total_99: FATOR_COBERTURA_99 * desvio_total,
+            percentual_rr_tolerancia: (FATOR_COBERTURA_99 * desvio_rr / tolerancia) * 100,
+            percentual_rr_variacao_total: desvio_total > 0 ? (desvio_rr / desvio_total) * 100 : 0,
+            ndc: ndc, ndc_interpretacao: ndc_interpretacao
+        };
+    }
+
+    function calcular_anova(dados_operadores, tolerancia) {
+        const numPecas = appState.qtdPecas, numReps = appState.qtdRepeticoes, numOps = appState.operadores.length;
+        const db = appState.dbMedicoes;
+        const grandMean = math.mean(db.map(d => d.valor));
+
+        let medias_peca = {}, medias_op = {}, medias_celula = {}; 
+        for(let p=1; p<=numPecas; p++) {
+            medias_peca[p] = math.mean(db.filter(d => parseInt(d.peca) === p).map(d=>d.valor));
+            medias_celula[p] = {};
+            for(let op of appState.operadores) {
+                medias_celula[p][op] = math.mean(db.filter(d => parseInt(d.peca) === p && d.operador === op).map(d=>d.valor));
+            }
+        }
+        for(let op of appState.operadores) {
+            medias_op[op] = math.mean(db.filter(d => d.operador === op).map(d=>d.valor));
+        }
+
+        let ss_peca = 0, ss_op = 0, ss_int = 0, ss_erro = 0, ss_total = 0;
+        for(let p=1; p<=numPecas; p++) ss_peca += Math.pow(medias_peca[p] - grandMean, 2);
+        ss_peca *= (numOps * numReps);
+        for(let op of appState.operadores) ss_op += Math.pow(medias_op[op] - grandMean, 2);
+        ss_op *= (numPecas * numReps);
+        for(let p=1; p<=numPecas; p++) {
+            for(let op of appState.operadores) ss_int += Math.pow(medias_celula[p][op] - medias_peca[p] - medias_op[op] + grandMean, 2);
+        }
+        ss_int *= numReps;
+        db.forEach(d => {
+            ss_erro += Math.pow(d.valor - medias_celula[d.peca][d.operador], 2);
+            ss_total += Math.pow(d.valor - grandMean, 2);
+        });
+
+        const gl_peca = numPecas - 1, gl_op = numOps - 1, gl_int = (numPecas - 1) * (numOps - 1);
+        const gl_erro = numPecas * numOps * (numReps - 1), gl_total = (numPecas * numOps * numReps) - 1;
+
+        const mq_peca = gl_peca > 0 ? ss_peca / gl_peca : 0, mq_op = gl_op > 0 ? ss_op / gl_op : 0;
+        const mq_int = gl_int > 0 ? ss_int / gl_int : 0, mq_erro = gl_erro > 0 ? ss_erro / gl_erro : 0;
+
+        const var_re = mq_erro;
+        const var_int = Math.max(0, (mq_int - mq_erro) / numReps);
+        const var_op = Math.max(0, (mq_op - mq_int) / (numPecas * numReps));
+        const var_peca = Math.max(0, (mq_peca - mq_int) / (numOps * numReps));
+
+        const var_ro = var_op + var_int, var_rr = var_re + var_ro, var_total_calc = var_rr + var_peca;
+
+        const desvio_re = Math.sqrt(var_re), desvio_ro = Math.sqrt(var_ro), desvio_peca = Math.sqrt(var_peca);
+        const desvio_rr = Math.sqrt(var_rr), desvio_total = Math.sqrt(var_total_calc);
+
+        // Integração do cálculo do NDC
+        const ndc = calcular_ndc(desvio_peca, desvio_rr);
+        const ndc_interpretacao = interpretar_ndc(ndc);
+
+        return {
+            metodo: 'ANOVA', tolerancia_total: tolerancia, estatisticas_operadores: calcularEstatisticasPorOperador(dados_operadores),
+            anova: { ss_peca, gl_peca, mq_peca, ss_op, gl_op, mq_op, ss_int, gl_int, mq_int, ss_erro, gl_erro, mq_erro, ss_total, gl_total },
+            desvio_padrao_repetitividade: desvio_re, repetitividade_99: FATOR_COBERTURA_99 * desvio_re,
+            desvio_padrao_operadores_corrigido: desvio_ro, reprodutibilidade_99: FATOR_COBERTURA_99 * desvio_ro,
+            desvio_padrao_peca_a_peca: desvio_peca, variacao_peca_a_peca_99: FATOR_COBERTURA_99 * desvio_peca,
+            desvio_padrao_rr: desvio_rr, rr_total: FATOR_COBERTURA_99 * desvio_rr,
+            desvio_padrao_total: desvio_total, variacao_total_99: FATOR_COBERTURA_99 * desvio_total,
+            percentual_rr_tolerancia: (FATOR_COBERTURA_99 * desvio_rr / tolerancia) * 100,
+            percentual_rr_variacao_total: desvio_total > 0 ? (desvio_rr / desvio_total) * 100 : 0,
+            ndc: ndc, ndc_interpretacao: ndc_interpretacao
+        };
+    }
+
+    function executarAnaliseEstatistica() {
+        const metodo = document.getElementById('calc-metodo').value;
+        const tolerancia = parseFloat(document.getElementById('calc-tolerancia').value);
+
+        if(isNaN(tolerancia) || tolerancia <= 0) {
+            customAlert("Informe uma tolerância válida e maior que zero.");
+            return;
+        }
+
+        try {
+            const dadosGrp = transformarParaDicionario();
+            if(metodo === 'amplitudes') appState.resultado = calcular_amplitudes(dadosGrp, tolerancia);
+            else appState.resultado = calcular_anova(dadosGrp, tolerancia);
+            
+            renderizarResultadosHTML();
+            renderizarGraficosMatplotlib();
+            
+            document.getElementById('tab-results').classList.remove('hidden');
+            document.getElementById('tab-charts').classList.remove('hidden');
+            switchTab('results');
+        } catch (e) {
+            customAlert("Erro na execução da análise: " + e.message);
+        }
+    }
+
+    // ==========================================================
+    // RENDERIZAÇÃO DE RESULTADOS E GRÁFICOS
+    // ==========================================================
+    function renderizarResultadosHTML() {
+        const res = appState.resultado;
+
+        let html = `
+            <div class="card grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <h3 class="font-bold border-b pb-1 mb-2 text-gray-800">Dados Gerais do Estudo</h3>
+                    <p><b>Método Utilizado:</b> ${res.metodo}</p>
+                    <p><b>Operadores:</b> ${appState.operadores.join(', ')}</p>
+                    <p><b>Tolerância:</b> ${res.tolerancia_total.toFixed(6)}</p>
+                </div>
+                <div>
+                    <h3 class="font-bold border-b pb-1 mb-2 text-gray-800">Julgamento Final</h3>
+                    <p><b>%R&R face à Tolerância:</b> ${res.percentual_rr_tolerancia.toFixed(2)}% <br> &rarr; ${classificar(res.percentual_rr_tolerancia)}</p>
+                    <p class="mt-2"><b>%R&R face à Var. Total:</b> ${res.percentual_rr_variacao_total.toFixed(2)}% <br> &rarr; ${classificar(res.percentual_rr_variacao_total)}</p>
+                    
+                    <div class="mt-3 pt-3 border-t border-gray-200">
+                        <p><b>ndc (Categorias Distintas):</b> ${res.ndc}</p>
+                        <p class="text-sm font-medium mt-1 ${res.ndc >= 5 ? 'text-green-600' : 'text-red-600'}">&rarr; ${res.ndc_interpretacao}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card overflow-x-auto">
+                <h3 class="font-bold border-b pb-2 mb-4 text-gray-800">Resumo da Variação (Gage R&R)</h3>
+                <table class="min-w-full text-sm text-left text-gray-600">
+                    <thead class="text-xs text-gray-700 uppercase bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-3">Componente Estatístico</th>
+                            <th class="px-4 py-3">Desvio-padrão</th>
+                            <th class="px-4 py-3">Variação do estudo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b hover:bg-gray-50 transition-colors">
+                            <td class="px-4 py-2 font-medium">Repetitividade (Valor VE)</td>
+                            <td class="px-4 py-2">${res.desvio_padrao_repetitividade.toFixed(6)}</td>
+                            <td class="px-4 py-2 font-semibold text-gray-800">${res.repetitividade_99.toFixed(6)}</td>
+                        </tr>
+                        <tr class="border-b hover:bg-gray-50 transition-colors">
+                            <td class="px-4 py-2 font-medium">Reprodutibilidade (Valor VO)</td>
+                            <td class="px-4 py-2">${res.desvio_padrao_operadores_corrigido.toFixed(6)}</td>
+                            <td class="px-4 py-2 font-semibold text-gray-800">${res.reprodutibilidade_99.toFixed(6)}</td>
+                        </tr>
+                        <tr class="font-bold border-b text-gray-800 hover:bg-gray-50 transition-colors">
+                            <td class="px-4 py-2">Gage R&R Total (Valor R&R)</td>
+                            <td class="px-4 py-2">${res.desvio_padrao_rr.toFixed(6)}</td>
+                            <td class="px-4 py-2">${res.rr_total.toFixed(6)}</td>
+                        </tr>
+                        <tr class="border-b hover:bg-gray-50 transition-colors">
+                            <td class="px-4 py-2 font-medium">Variação Peça a Peça (Valor VP)</td>
+                            <td class="px-4 py-2">${res.desvio_padrao_peca_a_peca.toFixed(6)}</td>
+                            <td class="px-4 py-2 font-semibold text-gray-800">${res.variacao_peca_a_peca_99.toFixed(6)}</td>
+                        </tr>
+                        <tr class="font-bold bg-gray-200 text-gray-900">
+                            <td class="px-4 py-3">Variação Total (Valor VT)</td>
+                            <td class="px-4 py-3">${res.desvio_padrao_total.toFixed(6)}</td>
+                            <td class="px-4 py-3">${res.variacao_total_99.toFixed(6)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+        if(res.metodo === 'ANOVA') {
+            html += `<div class="card overflow-x-auto">
+                <h3 class="font-bold border-b pb-2 mb-4 text-gray-800">Tabela ANOVA (Dois Fatores com Interação)</h3>
+                <table class="min-w-full text-sm text-left text-gray-600">
+                    <thead class="text-xs text-gray-700 uppercase bg-gray-100"><tr><th class="px-4 py-3">Fonte da Variação</th><th class="px-4 py-3">Graus Liberdade</th><th class="px-4 py-3">Soma dos Quadrados (SQ)</th><th class="px-4 py-3">Quadrado Médio (QM)</th></tr></thead>
+                    <tbody>
+                        <tr class="border-b"><td class="px-4 py-2">Peça</td><td class="px-4 py-2">${res.anova.gl_peca}</td><td class="px-4 py-2">${res.anova.ss_peca.toFixed(6)}</td><td class="px-4 py-2">${res.anova.mq_peca.toFixed(6)}</td></tr>
+                        <tr class="border-b"><td class="px-4 py-2">Operador</td><td class="px-4 py-2">${res.anova.gl_op}</td><td class="px-4 py-2">${res.anova.ss_op.toFixed(6)}</td><td class="px-4 py-2">${res.anova.mq_op.toFixed(6)}</td></tr>
+                        <tr class="border-b"><td class="px-4 py-2">Interação (Peça*Op)</td><td class="px-4 py-2">${res.anova.gl_int}</td><td class="px-4 py-2">${res.anova.ss_int.toFixed(6)}</td><td class="px-4 py-2">${res.anova.mq_int.toFixed(6)}</td></tr>
+                        <tr class="border-b"><td class="px-4 py-2">Repetitividade (Erro)</td><td class="px-4 py-2">${res.anova.gl_erro}</td><td class="px-4 py-2">${res.anova.ss_erro.toFixed(6)}</td><td class="px-4 py-2">${res.anova.mq_erro.toFixed(6)}</td></tr>
+                        <tr class="font-bold bg-gray-50 text-gray-900"><td class="px-4 py-2">Total</td><td class="px-4 py-2">${res.anova.gl_total}</td><td class="px-4 py-2">${res.anova.ss_total.toFixed(6)}</td><td class="px-4 py-2">-</td></tr>
+                    </tbody>
+                </table>
+            </div>`;
+        }
+        document.getElementById('view-results').innerHTML = html;
+    }
+
+    function criarDadosHistograma(rawData, numBins = 7) {
+        if (!rawData || rawData.length === 0) return { labels: [], data: [] };
+        let min = Math.min(...rawData);
+        let max = Math.max(...rawData);
+        if (min === max) max = min + 0.01; 
+        
+        let binWidth = (max - min) / numBins;
+        let bins = new Array(numBins).fill(0);
+        let labels = [];
+
+        for (let i = 0; i < numBins; i++) {
+            let binStart = min + i * binWidth;
+            let binEnd = binStart + binWidth;
+            labels.push(`${binStart.toFixed(3)} a ${binEnd.toFixed(3)}`);
+        }
+
+        rawData.forEach(val => {
+            let binIndex = Math.floor((val - min) / binWidth);
+            if (binIndex >= numBins) binIndex = numBins - 1; 
+            bins[binIndex]++;
+        });
+
+        return { labels, data: bins };
+    }
+
+    function renderizarGraficosMatplotlib() {
+        if (typeof ChartDataLabels !== 'undefined') {
+            Chart.register(ChartDataLabels);
+        }
+
+        chartInstances.forEach(c => c.destroy()); chartInstances = [];
+        const res = appState.resultado;
+        const labelsPecas = Array.from({length: appState.qtdPecas}, (_, i) => `Pç ${i+1}`);
+        const colors = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#9333ea', '#0891b2', '#be123c'];
+
+        let datasetsInt = appState.operadores.map((op, idx) => ({
+            label: `Op: ${op}`,
+            data: Array.from({length: appState.qtdPecas}, (_, i) => res.estatisticas_operadores[op].media_por_peca[i+1]),
+            borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], tension: 0.1, fill: false,
+            pointStyle: 'line', pointRadius: 8
+        }));
+
+        chartInstances.push(new Chart(document.getElementById('chart-interaction').getContext('2d'), {
+            type: 'line', data: { labels: labelsPecas, datasets: datasetsInt },
+            options: { 
+                responsive: true, 
+                plugins: { 
+                    datalabels: { display: false },
+                    legend: { position: 'bottom', labels: { usePointStyle: true } },
+                    tooltip: { usePointStyle: true }
+                }, 
+                scales: { y: { title: { display: true, text: 'Média da Peça' } } } 
+            }
+        }));
+
+        const opsContainer = document.getElementById('charts-operadores-container');
+        opsContainer.innerHTML = '';
+        appState.operadores.forEach((op, idx) => {
+            const div = document.createElement('div');
+            div.className = 'card grid grid-cols-1 lg:grid-cols-3 gap-6';
+            div.innerHTML = `
+                <div><h4 class="text-center font-bold text-sm mb-2 text-gray-700">Histograma - ${escapeHTML(op)}</h4><canvas id="chart-hist-${idx}"></canvas></div>
+                <div><h4 class="text-center font-bold text-sm mb-2 text-gray-700">Médias - ${escapeHTML(op)}</h4><canvas id="chart-mean-${idx}"></canvas></div>
+                <div><h4 class="text-center font-bold text-sm mb-2 text-gray-700">Amplitudes - ${escapeHTML(op)}</h4><canvas id="chart-range-${idx}"></canvas></div>
+            `;
+            opsContainer.appendChild(div);
+
+            const rawDataOp = appState.dbMedicoes.filter(d => d.operador === op).map(d => d.valor);
+            const histData = criarDadosHistograma(rawDataOp, 7);
+            
+            chartInstances.push(new Chart(document.getElementById(`chart-hist-${idx}`).getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: histData.labels,
+                    datasets: [{
+                        label: 'Frequência',
+                        data: histData.data,
+                        backgroundColor: colors[idx % colors.length] + '80',
+                        borderColor: colors[idx % colors.length],
+                        borderWidth: 1,
+                        barPercentage: 1.0,
+                        categoryPercentage: 1.0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    layout: { padding: { top: 20 } },
+                    plugins: { 
+                        datalabels: {
+                            display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                            anchor: 'end', align: 'end', color: '#374151', font: { weight: 'bold' }
+                        },
+                        legend: { display: false }, 
+                        tooltip: { displayColors: false, callbacks: { title: (ctx) => 'Intervalo: ' + ctx[0].label } } 
+                    },
+                    scales: { x: { display: false }, y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                }
+            }));
+
+            const dMedias = [], dAmplitudes = [];
+            for(let p=1; p<=appState.qtdPecas; p++) {
+                dMedias.push(res.estatisticas_operadores[op].media_por_peca[p]);
+                dAmplitudes.push(res.estatisticas_operadores[op].amplitude_por_peca[p]);
+            }
+            
+            chartInstances.push(new Chart(document.getElementById(`chart-mean-${idx}`).getContext('2d'), {
+                type: 'line', 
+                data: { 
+                    labels: labelsPecas, 
+                    datasets: [
+                        { label: 'Média da Peça', data: dMedias, borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], tension: 0.1, fill: false, pointStyle: 'line', pointRadius: 8 },
+                        { label: 'Média Geral', data: Array(appState.qtdPecas).fill(res.estatisticas_operadores[op].media_global_operador), borderColor: '#16a34a', backgroundColor: '#16a34a', borderDash: [10, 5, 2, 5], pointRadius: 0, fill: false, pointStyle: 'line' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { datalabels: { display: false }, legend: { labels: { usePointStyle: true } }, tooltip: { usePointStyle: true } }
+                }
+            }));
+
+            chartInstances.push(new Chart(document.getElementById(`chart-range-${idx}`).getContext('2d'), {
+                type: 'line', 
+                data: { 
+                    labels: labelsPecas, 
+                    datasets: [
+                        { label: 'Amplitude', data: dAmplitudes, borderColor: colors[idx % colors.length], backgroundColor: colors[idx % colors.length], tension: 0.1, fill: false, pointStyle: 'line', pointRadius: 8 },
+                        { label: 'Amp. Média', data: Array(appState.qtdPecas).fill(res.estatisticas_operadores[op].amplitude_media_operador), borderColor: '#16a34a', backgroundColor: '#16a34a', borderDash: [10, 5, 2, 5], pointRadius: 0, fill: false, pointStyle: 'line' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { datalabels: { display: false }, legend: { labels: { usePointStyle: true } }, tooltip: { usePointStyle: true } }
+                }
+            }));
+        });
+    }
+
+</script>
+</body>
+</html>
